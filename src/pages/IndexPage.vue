@@ -3,6 +3,7 @@
     <q-btn to="/videochat">Video Chat</q-btn>
     <!-- <q-btn to="/rtcmaster">RTC Master</q-btn>
     <q-btn to="/rtcslave">RTC Slave</q-btn> -->
+    <q-btn to="/segmentation">tensorflow segmentation</q-btn>
   </q-page>
 </template>
 

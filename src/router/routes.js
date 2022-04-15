@@ -4,9 +4,14 @@ const routes = [
     component: () => import("layouts/MainLayout.vue"),
     children: [
       { path: "", component: () => import("pages/IndexPage.vue") },
+
       {
         path: "/videochat",
         component: () => import("pages/PageVideoChat.vue"),
+      },
+      {
+        path: "/segmentation",
+        component: () => import("pages/PageSegmentation.vue"),
       },
       // {
       //   path: "/rtcmaster",
