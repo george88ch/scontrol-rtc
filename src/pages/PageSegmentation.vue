@@ -13,7 +13,10 @@
         ></video>
         <canvas id="showcanvas"></canvas>
       </q-card-section>
-      <q-card-section> </q-card-section>
+      <q-card-section>
+        <h1>Picture</h1>
+        <canvas id="snapshot"></canvas>
+      </q-card-section>
       <q-card-section>
         <div class="row q-gutter-sm q-mb-sm">
           <q-btn @click="onStartWebcam">Start Webcam</q-btn>
@@ -31,6 +34,9 @@
         <div class="row q-gutter-sm q-mb-sm">
           <q-btn @click="onStartBodypix">Start BodyPix</q-btn>
           <q-btn @click="onStopBodyPix">Stop BodyPix</q-btn>
+        </div>
+        <div class="row q-gutter-sm q-mb-sm">
+          <q-btn @click="onTakePicture">Take Picture</q-btn>
         </div>
       </q-card-section>
     </q-card>
@@ -58,6 +64,7 @@ const {
   startPoses,
   stopPoses,
   startBodyPix,
+  takePicture,
 } = useMl5();
 
 const showHide = ref(false);
@@ -75,7 +82,7 @@ const showHide = ref(false);
 */
 
 /*
-  data
+  methods
 */
 const onStartWebcam = async () => {
   await startWebcam();
@@ -112,6 +119,10 @@ const onStartBodypix = async () => {
 
 const onStopBodyPix = () => {
   // stopPoses();
+};
+
+const onTakePicture = () => {
+  takePicture();
 };
 
 /*

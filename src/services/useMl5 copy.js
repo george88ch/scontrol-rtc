@@ -9,63 +9,56 @@ const useMl5 = () => {
   let stopFlag = false;
   let showCam = false;
   let isCamRunning = false;
-  let bodypixResult = null;
+  let segmentation;
 
   //---------------------------------------------------------------
-  // Webcam
+  // Posenet
   //---------------------------------------------------------------
-  const startWebcam = () => {
-    return new Promise(async (resolve, reject) => {
-      videoElement = document.getElementById("webcam");
-      videoElement.setAttribute("style", "display: none;");
-      videoElement.width = width;
-      videoElement.height = height;
+  let poseNet;
+  let poses = [];
+  let stopDrawing = false;
 
-      // Create a webcam capture
-      const capture = await navigator.mediaDevices.getUserMedia({
-        video: true,
-      });
-      videoElement.srcObject = capture;
-      showCam = false;
-      isCamRunning = true;
-      videoElement.play();
+  function modelReady() {
+    console.log("model loaded!");
+  }
 
-      // prepare in canvas
-      canvas = document.getElementById("showcanvas");
-      canvas.height = height;
-      canvas.width = width;
-      ctx = canvas.getContext("2d");
-
-      // show webcam in canvas
-      requestAnimationFrame(draw);
-
-      resolve();
-    });
-  };
-  const stopWebcam = () => {
-    const stream = videoElement.srcObject;
-    const tracks = stream.getTracks();
-
-    tracks.forEach(function (track) {
-      track.stop();
-    });
-
-    videoElement.srcObject = null;
-    isCamRunning = false;
+  const _callback = (res) => {
+    poses = res;
   };
 
-  const showHideWebcam = (showHide) => {
-    if (videoElement) {
-      videoElement.setAttribute(
-        "style",
-        showHide ? "display: block" : "display: none"
-      );
-      showCam = showHide;
+  const startPoses = async () => {
+    console.log("start poses");
+    // start webcam (if not already running)
+    if (!isCamRunning) {
+      console.log("cam not running.");
+      return;
     }
+
+    // set up canvas
+    canvas = document.getElementById("showcanvas");
+    canvas.height = height;
+    canvas.width = width;
+    ctx = canvas.getContext("2d");
+
+    // init posenet
+    // Create a new poseNet method with a single detection
+    poseNet = await ml5.poseNet(videoElement, modelReady);
+    // This sets up an event that fills the global variable "poses"
+    // with an array every time new poses are detected
+    poseNet.on("pose", _callback);
+
+    requestAnimationFrame(draw);
   };
 
-  // draw loop
-  const draw = () => {
+  const stopPoses = () => {
+    console.log("stop poses");
+    // stop listening to pose detection events by removing the event listener
+    poseNet.removeListener("pose", () => {});
+    poseNet = null;
+    stopDrawing = true;
+  };
+
+  function draw() {
     // stop drawing?
     if (stopDrawing) {
       return;
@@ -73,8 +66,8 @@ const useMl5 = () => {
 
     requestAnimationFrame(draw);
 
-    // get image from webcam
     ctx.drawImage(videoElement, 0, 0, width, height);
+    // We can call both functions to draw all keypoints and the skeletons
 
     // For one pose only (use a for loop for multiple poses!)
     if (poses.length > 0) {
@@ -104,68 +97,7 @@ const useMl5 = () => {
       ctx.fill();
       ctx.stroke();
     }
-
-    // add bodypix
-    if (bodypixResult) {
-      const maskBackground = imageDataToCanvas(
-        bodypixResult.raw.backgroundMask.data,
-        bodypixResult.raw.backgroundMask.width,
-        bodypixResult.raw.backgroundMask.height
-      );
-      ctx.drawImage(maskBackground, 0, 0, width, height);
-    }
-  };
-  //---------------------------------------------------------------
-  // take picture
-  //---------------------------------------------------------------
-  const takePicture = () => {
-    console.log("take picture");
-    // prepare in canvas
-    const snapShotCanvas = document.getElementById("snapshot");
-    snapShotCanvas.height = height;
-    snapShotCanvas.width = width;
-    const snapShotCtx = snapShotCanvas.getContext("2d");
-
-    snapShotCtx.fillRect(0, 0, width, height);
-    snapShotCtx.drawImage(videoElement, 0, 0, width, height);
-  };
-  //---------------------------------------------------------------
-  // PoseNet
-  //---------------------------------------------------------------
-  let poseNet;
-  let poses = [];
-  let stopDrawing = false;
-
-  function modelReady() {
-    console.log("model loaded!");
   }
-
-  const _callback = (res) => {
-    poses = res;
-  };
-
-  const startPoses = async () => {
-    console.log("start poses");
-    // start webcam (if not already running)
-    if (!isCamRunning) {
-      console.log("cam not running.");
-      return;
-    }
-
-    // Create a new poseNet method with a single detection
-    poseNet = await ml5.poseNet(videoElement, modelReady);
-    // This sets up an event that fills the global variable "poses"
-    // with an array every time new poses are detected
-    poseNet.on("pose", _callback);
-  };
-
-  const stopPoses = () => {
-    console.log("stop poses");
-    // stop listening to pose detection events by removing the event listener
-    poseNet.removeListener("pose", () => {});
-    poseNet = null;
-    stopDrawing = true;
-  };
 
   //---------------------------------------------------------------
   // BodyPix
@@ -180,20 +112,21 @@ const useMl5 = () => {
     bodypix = await ml5.bodyPix(bodypixOptions);
     bodypix.segment(videoElement, gotBodypixImage, bodypixOptions);
   };
-  const gotBodypixImage = (err, res) => {
+  const gotBodypixImage = (err, result) => {
     if (err) {
       console.log(err);
       return;
     }
-    // set bodypix results
-    bodypixResult = res;
+    segmentation = result;
+    ctx.drawImage(videoElement, 0, 0, width, height);
+    const maskBackground = imageDataToCanvas(
+      result.raw.backgroundMask.data,
+      result.raw.backgroundMask.width,
+      result.raw.backgroundMask.height
+    );
+    ctx.drawImage(maskBackground, 0, 0, width, height);
 
     bodypix.segment(videoElement, gotBodypixImage, bodypixOptions);
-  };
-  const stopBodyPix = () => {
-    console.log("stop bodypix");
-    result = null;
-    stopDrawing = true;
   };
 
   //---------------------------------------------------------------
@@ -326,16 +259,16 @@ const useMl5 = () => {
     // load bodyPix with video
     bodypix = await ml5.bodyPix(videoElement);
     // run the segmentation on the video, handle the results in a callback
-    bodypix.segmentWithParts(gotPartsImage, options);
+    bodypix.segmentWithParts(gotImage, options);
   };
 
-  function gotPartsImage(err, result) {
+  function gotImage(err, result) {
     if (err) {
       console.log(err);
       return;
     }
 
-    // segmentation = result;
+    segmentation = result;
     ctx.drawImage(videoElement, 0, 0, width, height);
 
     const parts = imageDataToCanvas(
@@ -349,12 +282,52 @@ const useMl5 = () => {
       return;
     }
 
-    bodypix.segmentWithParts(gotPartsImage, options);
+    bodypix.segmentWithParts(gotImage, options);
   }
 
   //
   // Helper Functions
   //
+  const startWebcam = () => {
+    return new Promise(async (resolve, reject) => {
+      videoElement = document.getElementById("webcam");
+      videoElement.setAttribute("style", "display: none;");
+      videoElement.width = width;
+      videoElement.height = height;
+
+      // Create a webcam capture
+      const capture = await navigator.mediaDevices.getUserMedia({
+        video: true,
+      });
+      videoElement.srcObject = capture;
+      showCam = false;
+      isCamRunning = true;
+      videoElement.play();
+
+      resolve();
+    });
+  };
+  const stopWebcam = () => {
+    const stream = videoElement.srcObject;
+    const tracks = stream.getTracks();
+
+    tracks.forEach(function (track) {
+      track.stop();
+    });
+
+    videoElement.srcObject = null;
+    isCamRunning = false;
+  };
+
+  const showHideWebcam = (showHide) => {
+    if (videoElement) {
+      videoElement.setAttribute(
+        "style",
+        showHide ? "display: block" : "display: none"
+      );
+      showCam = showHide;
+    }
+  };
 
   // Convert a ImageData to a Canvas
   function imageDataToCanvas(imageData, x, y) {
@@ -388,7 +361,6 @@ const useMl5 = () => {
     startPoses,
     stopPoses,
     startBodyPix,
-    takePicture,
   };
 };
 

@@ -15,16 +15,27 @@
     <!-- <button id="webcamButton">Start webcam</button> -->
     <q-btn @click="onStartWebCam">Start Webcam</q-btn>
     <h2>2. Create a new Call</h2>
-    <!-- <button id="callButton" disabled>Create Call (offer)</button> -->
-    <q-btn @click="onStartCall">Create Call</q-btn>
+    <q-input
+      type="text"
+      v-model="sessionName"
+      label="Sessionname"
+      hint="Achtung: Wer diesen Namen kennt, kann der Session beitreten."
+      class="q-mb-sm"
+    ></q-input>
+    <q-btn @click="onCreateCall">Create Call</q-btn>
+    <p v-if="callId" class="q-mt-sm">
+      Session <b>{{ sessionName }}</b> mit Id :
+      <b
+        ><span>{{ callId }}</span></b
+      >
+      erstellt.
+    </p>
 
     <h2>3. Join a Call</h2>
     <p>Answer the call from a different browser window or device</p>
 
-    <input id="callInput" />
-    <q-input type="text" v-model="callId" label="Call Id"></q-input>
+    <q-input type="text" v-model="searchName" label="Session Name"></q-input>
     <q-btn @click="onAnswerCall">Answer</q-btn>
-    <!-- <button id="answerButton" disabled>Answer</button> -->
 
     <h2>4. Hangup</h2>
 
@@ -36,23 +47,29 @@
 import { ref } from "vue";
 import useRtc from "src/services/useRTC";
 
-const { startWebCam, startCall, answerCall, hangUp } = useRtc();
+const { startWebCam, createCall, answerCall, hangUp } = useRtc();
 
 const callId = ref("");
+const sessionName = ref("");
+const searchName = ref("");
 
 const onStartWebCam = async () => {
-  startWebCam();
+  await startWebCam();
 };
 
-const onStartCall = async () => {
-  callId.value = await startCall();
+const onCreateCall = async () => {
+  const call = await createCall(sessionName.value);
+  callId.value = call.id;
+  sessionName.value = call.sessionname;
 };
 
 const onAnswerCall = async () => {
-  answerCall();
+  answerCall(searchName.value);
 };
 
 const onHangUp = () => {
+  callId.value = "";
+  sessionName.value = "";
   hangUp();
 };
 

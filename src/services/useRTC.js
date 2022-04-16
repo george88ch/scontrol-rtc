@@ -25,10 +25,7 @@ const useRtc = () => {
   const servers = {
     iceServers: [
       {
-        urls: [
-          "stun:stun1.l.google.com:19302", //,
-          // "stun:stun2.l.google.com:19302",
-        ], // free stun server
+        urls: ["stun:stun1.l.google.com:19302"], // free stun server
       },
     ],
     iceCandidatePoolSize: 10,
@@ -82,15 +79,15 @@ const useRtc = () => {
   //
   // Create an offer
   //
-  const startCall = () => {
+  const createCall = (sessionName) => {
     return new Promise(async (resolve, reject) => {
       // Reference Firestore collections for signaling
       const callDoc = firestore.collection("calls").doc();
       const offerCandidates = callDoc.collection("offerCandidates");
       const answerCandidates = callDoc.collection("answerCandidates");
 
-      callInput = document.getElementById("callInput");
-      callInput.value = callDoc.id;
+      // callInput = document.getElementById("callInput");
+      // callInput.value = callDoc.id;
 
       // Get candidates for caller, save to db
       pc.onicecandidate = (event) => {
@@ -107,6 +104,21 @@ const useRtc = () => {
       };
 
       await callDoc.set({ offer });
+
+      // create a doc with sessioname as id containing the callId
+      // (will be used to get ad call id upon a sessionname)
+      firestore
+        .collection("callnames")
+        .doc(sessionName)
+        .set({
+          callId: callDoc.id,
+        })
+        .then(() => {
+          console.log("Document successfully written!");
+        })
+        .catch((error) => {
+          console.error("Error writing document: ", error);
+        });
 
       // Listen for remote answer
       unsubCallDoc = callDoc.onSnapshot((snapshot) => {
@@ -127,6 +139,9 @@ const useRtc = () => {
         });
       });
 
+      //  return callId
+      resolve({ id: callDoc.id, sessionname: sessionName });
+
       // hangupButton.disabled = false;
     });
   };
@@ -134,47 +149,61 @@ const useRtc = () => {
   //
   // answer call
   //
-  const answerCall = async () => {
-    console.log("answer call");
-    callInput = document.getElementById("callInput");
-    const callId = callInput.value;
-    const callDoc = firestore.collection("calls").doc(callId);
-    const answerCandidates = callDoc.collection("answerCandidates");
-    const offerCandidates = callDoc.collection("offerCandidates");
+  const answerCall = (sessionName) => {
+    return new Promise(async (resolve, reject) => {
+      // get call id (with session name)
+      const callId = await getCallId(sessionName);
+      if (!callId) {
+        console.log("error");
+        reject("error");
+      }
 
-    pc.onicecandidate = (event) => {
-      event.candidate && answerCandidates.add(event.candidate.toJSON());
-    };
+      // read offer
+      // const callDoc = await getCallData(callId);
+      // console.log("callDoc: ", callDoc);
 
-    const callData = (await callDoc.get()).data();
+      const callDoc = firestore.collection("calls").doc(callId);
+      const answerCandidates = callDoc.collection("answerCandidates");
+      const offerCandidates = callDoc.collection("offerCandidates");
 
-    const offerDescription = callData.offer;
-    await pc.setRemoteDescription(new RTCSessionDescription(offerDescription));
+      pc.onicecandidate = (event) => {
+        event.candidate && answerCandidates.add(event.candidate.toJSON());
+      };
+      const res = await callDoc.get();
+      const callData = res.data();
+      console.log(" 1 calData: ", callData);
 
-    const answerDescription = await pc.createAnswer();
-    await pc.setLocalDescription(answerDescription);
+      const offerDescription = callData.offer;
+      await pc.setRemoteDescription(
+        new RTCSessionDescription(offerDescription)
+      );
 
-    const answer = {
-      type: answerDescription.type,
-      sdp: answerDescription.sdp,
-    };
+      const answerDescription = await pc.createAnswer();
+      await pc.setLocalDescription(answerDescription);
 
-    await callDoc.update({ answer });
+      const answer = {
+        type: answerDescription.type,
+        sdp: answerDescription.sdp,
+      };
 
-    unsubOfferCandidates = offerCandidates.onSnapshot((snapshot) => {
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === "added") {
-          let data = change.doc.data();
-          console.log(data);
-          pc.addIceCandidate(new RTCIceCandidate(data));
-        }
+      await callDoc.update({ answer });
+
+      unsubOfferCandidates = offerCandidates.onSnapshot((snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === "added") {
+            let data = change.doc.data();
+            pc.addIceCandidate(new RTCIceCandidate(data));
+          }
+        });
       });
+      resolve();
     });
   };
   //
   // hang up
   //
   const hangUp = () => {
+    console.log("hangup");
     // unsub
     if (unsubOfferCandidates) {
       unsubOfferCandidates();
@@ -185,15 +214,73 @@ const useRtc = () => {
     if (unsubCallDoc) {
       unsubCallDoc();
     }
+
+    // stop local stream
+    const localtracks = localStream.getTracks();
+    localtracks.forEach(function (track) {
+      track.stop();
+    });
+
+    // stop remote stream
+    const remotetracks = localStream.getTracks();
+    remotetracks.forEach(function (track) {
+      track.stop();
+    });
+
     // reset vars
     localStream = null;
     remoteStream = null;
     webcamVideo = null;
     remoteVideo = null;
-    // callIdInput = null;
+    localStream = null;
   };
 
-  return { startWebCam, startCall, answerCall, hangUp };
+  const getCallId = (sessionName) => {
+    return new Promise(async (resolve, reject) => {
+      var docRef = firestore.collection("callnames").doc(sessionName);
+
+      docRef
+        .get()
+        .then((doc) => {
+          if (doc.exists) {
+            console.log("get callId:", doc.data());
+            resolve(doc.data().callId);
+          } else {
+            // doc.data() will be undefined in this case
+            console.log("No such document!");
+            reject("No call doc foun!");
+          }
+        })
+        .catch((error) => {
+          console.log("Error getting call document:", error);
+        });
+    });
+  };
+
+  const getCallData = (id) => {
+    return new Promise(async (resolve, reject) => {
+      console.log("callDocId: ", id);
+      const docRef = firestore.collection("calls").doc(id);
+
+      docRef
+        .get()
+        .then((doc) => {
+          if (doc.exists) {
+            console.log("Document data:", doc.data());
+            resolve(doc.data());
+          } else {
+            // doc.data() will be undefined in this case
+            console.log("no call data found");
+            reject("no call data found");
+          }
+        })
+        .catch((error) => {
+          console.log("Error getting document:", error);
+        });
+    });
+  };
+
+  return { startWebCam, createCall, answerCall, hangUp };
 };
 
 export default useRtc;
