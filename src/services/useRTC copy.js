@@ -1,31 +1,31 @@
-import {
-  addDoc,
-  getDoc,
-  doc,
-  onSnapshot,
-  setDoc,
-  collection,
-  query,
-} from "firebase/firestore";
-import useFirebase from "src/boot/firebase";
+// import firebase from "firebase/app";
+// import "firebase/firestore";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyDOYbHXcULh9lFLYvyj8_oxv84AAkJlHVw",
+  authDomain: "scontrol-quasar.firebaseapp.com",
+  projectId: "scontrol-quasar",
+  storageBucket: "scontrol-quasar.appspot.com",
+  messagingSenderId: "987144406400",
+  appId: "1:987144406400:web:784301c020c45b228d2d65",
+};
+
+if (!firebase.apps.length) {
+  firebase.initializeApp(firebaseConfig);
+}
+const firestore = firebase.firestore();
 
 const useRtc = () => {
-  // db reference
-  const { db } = useFirebase();
-
   // snapshot handlers (used to unsubscribe on hang up)
-  let unsubAnswers = null;
-  let unsubCandidates = null;
-  let unsubCandidatesAnswer = null;
+  let unsubOfferCandidates = null;
+  let unsubAnswerCandidates = null;
+  let unsubCallDoc = null;
 
   // server config
   const servers = {
     iceServers: [
       {
-        urls: [
-          "stun:stun1.l.google.com:19302",
-          "stun:stun2.l.google.com:19302",
-        ], // free stun server
+        urls: ["stun:stun1.l.google.com:19302"], // free stun server
       },
     ],
     iceCandidatePoolSize: 10,
@@ -33,85 +33,68 @@ const useRtc = () => {
 
   // global states
   const pc = new RTCPeerConnection(servers);
+
   let localStream = null;
   let remoteStream = null;
 
   let webcamVideo = null;
   let remoteVideo = null;
-  // let callIdInput = null;
+  let callInput = null;
 
   //
   // Media setup
   //
   const startWebCam = async () => {
-    console.log("start webcam");
-
     webcamVideo = document.getElementById("webcamVideo");
     remoteVideo = document.getElementById("remoteVideo");
 
-    // setting local stream to the video from our camera
     localStream = await navigator.mediaDevices.getUserMedia({
       video: true,
       audio: false,
     });
-
-    // initalizing the remote server to the mediastream
     remoteStream = new MediaStream();
 
-    // Pushing tracks from local stream to peerConnection
+    // Push tracks from local stream to peer connection
     localStream.getTracks().forEach((track) => {
+      console.log("ontrack local", track);
       pc.addTrack(track, localStream);
     });
 
-    // Pull tracks from remote stream
+    // Pull tracks from remote stream, add to video stream
     pc.ontrack = (event) => {
       event.streams[0].getTracks().forEach((track) => {
+        console.log("ontrack remote", track);
         remoteStream.addTrack(track);
       });
     };
 
-    // displaying the video data from the stream to the webpage
-    webcamVideo.srcObject = localStream;
     remoteVideo.srcObject = remoteStream;
+    webcamVideo.srcObject = localStream;
+
+    // callButton.disabled = false;
+    // answerButton.disabled = false;
+    // webcamButton.disabled = true;
   };
 
   //
   // Create an offer
   //
-  const startCall = () => {
+  const createCall = (sessionName) => {
     return new Promise(async (resolve, reject) => {
-      //
-      // get ref to calls
-      //
-      const callDoc = collection(db, "calls");
+      // Reference Firestore collections for signaling
+      const callDoc = firestore.collection("calls").doc();
+      const offerCandidates = callDoc.collection("offerCandidates");
+      const answerCandidates = callDoc.collection("answerCandidates");
 
-      //
-      // add new call document (it's id will be the call id)
-      //
-      const docRef = await addDoc(callDoc, {
-        name: "dummy",
-      });
-      const callDocId = docRef.id;
-      console.log("Document written with ID: ", callDocId);
+      // callInput = document.getElementById("callInput");
+      // callInput.value = callDoc.id;
 
-      //
-      // Get candidates for caller, save to db (will be fired by setLocalDescription)
-      //
-      pc.onicecandidate = async (event) => {
-        if (event.candidate) {
-          const offerDoc = collection(
-            db,
-            "calls",
-            callDocId,
-            "offerCandidates"
-          );
-          await addDoc(offerDoc, event.candidate.toJSON());
-        }
+      // Get candidates for caller, save to db
+      pc.onicecandidate = (event) => {
+        event.candidate && offerCandidates.add(event.candidate.toJSON());
       };
 
-      //
-      // config for offer and save to db
-      //
+      // Create offer
       const offerDescription = await pc.createOffer();
       await pc.setLocalDescription(offerDescription);
 
@@ -120,14 +103,26 @@ const useRtc = () => {
         type: offerDescription.type,
       };
 
-      await setDoc(doc(db, "calls", callDocId), offer);
+      await callDoc.set({ offer });
 
-      //
-      // listen for remote answer
-      //
-      unsubAnswers = onSnapshot(doc(db, "calls", callDocId), (doc) => {
-        console.log("answer: ", doc.data());
-        const data = doc.data();
+      // create a doc with sessioname as id containing the callId
+      // (will be used to get ad call id upon a sessionname)
+      firestore
+        .collection("callnames")
+        .doc(sessionName)
+        .set({
+          callId: callDoc.id,
+        })
+        .then(() => {
+          console.log("Document successfully written!");
+        })
+        .catch((error) => {
+          console.error("Error writing document: ", error);
+        });
+
+      // Listen for remote answer
+      unsubCallDoc = callDoc.onSnapshot((snapshot) => {
+        const data = snapshot.data();
         if (!pc.currentRemoteDescription && data?.answer) {
           const answerDescription = new RTCSessionDescription(data.answer);
           pc.setRemoteDescription(answerDescription);
@@ -135,9 +130,7 @@ const useRtc = () => {
       });
 
       // When answered, add candidate to peer connection
-      const answerDoc = collection(db, "calls", docRef.id, "offerAnswers");
-      const q = query(answerDoc);
-      unsubCandidates = onSnapshot(q, (snapshot) => {
+      unsubAnswerCandidates = answerCandidates.onSnapshot((snapshot) => {
         snapshot.docChanges().forEach((change) => {
           if (change.type === "added") {
             const candidate = new RTCIceCandidate(change.doc.data());
@@ -146,92 +139,148 @@ const useRtc = () => {
         });
       });
 
-      resolve(docRef.id);
+      //  return callId
+      resolve({ id: callDoc.id, sessionname: sessionName });
+
+      // hangupButton.disabled = false;
     });
   };
 
   //
   // answer call
   //
-  const answerCall = async (callId) => {
-    console.log("answer call", callId);
-
-    //
-    // get call doc
-    const docRef = doc(db, "calls", callId);
-    const docSnap = await getDoc(docRef);
-
-    if (docSnap.exists()) {
-      console.log("Document data:", docSnap.data());
-    } else {
-      // doc.data() will be undefined in this case
-      console.log("No such document!");
-    }
-
-    //
-    // Get answers for caller, save to db (will be fired by setLocalDescription)
-    //
-    pc.onicecandidate = async (event) => {
-      if (event.candidate) {
-        const answerCandidates = collection(
-          db,
-          "calls",
-          callId,
-          "offerAnswers"
-        );
-        await addDoc(answerCandidates, event.candidate.toJSON());
+  const answerCall = (sessionName) => {
+    return new Promise(async (resolve, reject) => {
+      // get call id (with session name)
+      const callId = await getCallId(sessionName);
+      if (!callId) {
+        console.log("error");
+        reject("error");
       }
-    };
 
-    const callData = docSnap.data();
-    await pc.setRemoteDescription(new RTCSessionDescription(callData));
+      // read offer
+      // const callDoc = await getCallData(callId);
+      // console.log("callDoc: ", callDoc);
 
-    const answerDescription = await pc.createAnswer();
-    await pc.setLocalDescription(answerDescription);
+      const callDoc = firestore.collection("calls").doc(callId);
+      const answerCandidates = callDoc.collection("answerCandidates");
+      const offerCandidates = callDoc.collection("offerCandidates");
 
-    const answer = {
-      type: answerDescription.type,
-      sdp: answerDescription.sdp,
-    };
+      pc.onicecandidate = (event) => {
+        event.candidate && answerCandidates.add(event.candidate.toJSON());
+      };
+      const res = await callDoc.get();
+      const callData = res.data();
+      console.log(" 1 calData: ", callData);
 
-    // await callDoc.update({ answer });
-    await setDoc(doc(db, "calls", callId), answer);
+      const offerDescription = callData.offer;
+      await pc.setRemoteDescription(
+        new RTCSessionDescription(offerDescription)
+      );
 
-    // When answered, add candidate to peer connection
-    const candidatesDoc = collection(db, "calls", callId, "offerCandidates");
-    const q = query(candidatesDoc);
-    unsubCandidatesAnswer = onSnapshot(q, (snapshot) => {
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === "added") {
-          console.log("snapshot candidatesAnswer", change.doc.data());
-          pc.addIceCandidate(new RTCIceCandidate(change.doc.data()));
-        }
+      const answerDescription = await pc.createAnswer();
+      await pc.setLocalDescription(answerDescription);
+
+      const answer = {
+        type: answerDescription.type,
+        sdp: answerDescription.sdp,
+      };
+
+      await callDoc.update({ answer });
+
+      unsubOfferCandidates = offerCandidates.onSnapshot((snapshot) => {
+        snapshot.docChanges().forEach((change) => {
+          if (change.type === "added") {
+            let data = change.doc.data();
+            pc.addIceCandidate(new RTCIceCandidate(data));
+          }
+        });
       });
+      resolve();
     });
   };
   //
   // hang up
   //
   const hangUp = () => {
+    console.log("hangup");
     // unsub
-    if (unsubCandidates) {
-      unsubCandidates();
+    if (unsubOfferCandidates) {
+      unsubOfferCandidates();
     }
-    if (unsubAnswers) {
-      unsubAnswers();
+    if (unsubAnswerCandidates) {
+      unsubAnswerCandidates();
     }
-    if (unsubCandidatesAnswer) {
-      unsubCandidatesAnswer();
+    if (unsubCallDoc) {
+      unsubCallDoc();
     }
+
+    // stop local stream
+    const localtracks = localStream.getTracks();
+    localtracks.forEach(function (track) {
+      track.stop();
+    });
+
+    // stop remote stream
+    const remotetracks = localStream.getTracks();
+    remotetracks.forEach(function (track) {
+      track.stop();
+    });
+
     // reset vars
     localStream = null;
     remoteStream = null;
     webcamVideo = null;
     remoteVideo = null;
-    // callIdInput = null;
+    localStream = null;
   };
 
-  return { startWebCam, startCall, answerCall, hangUp };
+  const getCallId = (sessionName) => {
+    return new Promise(async (resolve, reject) => {
+      var docRef = firestore.collection("callnames").doc(sessionName);
+
+      docRef
+        .get()
+        .then((doc) => {
+          if (doc.exists) {
+            console.log("get callId:", doc.data());
+            resolve(doc.data().callId);
+          } else {
+            // doc.data() will be undefined in this case
+            console.log("No such document!");
+            reject("No call doc foun!");
+          }
+        })
+        .catch((error) => {
+          console.log("Error getting call document:", error);
+        });
+    });
+  };
+
+  const getCallData = (id) => {
+    return new Promise(async (resolve, reject) => {
+      console.log("callDocId: ", id);
+      const docRef = firestore.collection("calls").doc(id);
+
+      docRef
+        .get()
+        .then((doc) => {
+          if (doc.exists) {
+            console.log("Document data:", doc.data());
+            resolve(doc.data());
+          } else {
+            // doc.data() will be undefined in this case
+            console.log("no call data found");
+            reject("no call data found");
+          }
+        })
+        .catch((error) => {
+          console.log("Error getting document:", error);
+        });
+    });
+  };
+
+  return { startWebCam, createCall, answerCall, hangUp };
 };
 
 export default useRtc;

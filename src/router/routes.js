@@ -13,6 +13,10 @@ const routes = [
         path: "/segmentation",
         component: () => import("pages/PageSegmentation.vue"),
       },
+      {
+        path: "/sandbox",
+        component: () => import("pages/PageSandbox.vue"),
+      },
       // {
       //   path: "/rtcmaster",
       //   component: () => import("pages/PageRtcMaster.vue"),

@@ -4,6 +4,7 @@
     <!-- <q-btn to="/rtcmaster">RTC Master</q-btn>
     <q-btn to="/rtcslave">RTC Slave</q-btn> -->
     <q-btn to="/segmentation">tensorflow segmentation</q-btn>
+    <q-btn to="/sandbox">Sandbox</q-btn>
   </q-page>
 </template>
 
