@@ -1,40 +1,43 @@
 import { ref, onMounted, onUnmounted } from "vue";
 
-export function useMouseCoordinates(elementId) {
-  // state encapsulated and managed by the composable
-  const x = ref(0);
-  const y = ref(0);
+export const useWebcam = (videoElementId, canvasElementId) => {
+  let video = null;
+  let canvas = null;
 
-  // el and rect are instantinated in onMounted (because they don't exist before)
-  let el = null;
-  let rect = null;
-
-  // set coordinates (x, y) when mouse is within element
-  const update = (event) => {
-    x.value = event.pageX - rect.left; //x position within the element.
-    y.value = event.pageY - rect.top; //y position within the element.
+  const constraints = {
+    audio: false,
+    video: true,
   };
-  // set coordinates (x, y) to 0 when mouse is NOT within element
-  const noupdate = (event) => {
-    x.value = 0;
-    y.value = 0;
+
+  //
+  // take picture, draw it to canvas
+  //
+  const takePicture = () => {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
   };
 
   onMounted(() => {
-    el = document.getElementById(elementId);
-    rect = el.getBoundingClientRect();
-    // fires when mouse leaves element
-    el.addEventListener("mouseleave", noupdate);
-    // fires when mouse ise moved inside element
-    el.addEventListener("mousemove", update);
+    video = document.getElementById(videoElementId);
+    canvas = window.canvas = document.getElementById(canvasElementId);
+    canvas.width = 480;
+    canvas.height = 360;
+
+    navigator.mediaDevices
+      .getUserMedia(constraints)
+      .then((stream) => {
+        window.stream = stream; // make stream available to browser console
+        video.srcObject = stream;
+      })
+      .catch((error) => {
+        console.log(
+          "navigator.MediaDevices.getUserMedia error: ",
+          error.message,
+          error.name
+        );
+      });
   });
 
-  onUnmounted(() => {
-    // remove listeners
-    el.removeEventListener("mousemove", update);
-    el.removeEventListener("mouseleave", noupdate);
-  });
-
-  // expose managed state as return value
-  return { x, y };
-}
+  return { takePicture };
+};
