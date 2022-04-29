@@ -13,7 +13,8 @@ export const usePosenet = (videoElementId, videoCanvasElementId) => {
 
   let getPosesInterval;
 
-  const poses = ref([]);
+  // const poses = ref([]);
+  let poses = null;
   // set true if detection running (shows spinner)
   const isDetectorRunning = ref(false);
 
@@ -25,8 +26,8 @@ export const usePosenet = (videoElementId, videoCanvasElementId) => {
     video = document.getElementById(videoElementId);
     canvas = document.getElementById(videoCanvasElementId);
     ctx = canvas.getContext("2d");
-    width = video.videoWidth / 2;
-    height = video.videoHeight / 2;
+    width = video.videoWidth;
+    height = video.videoHeight;
     await loadDetector();
   });
 
@@ -75,20 +76,41 @@ export const usePosenet = (videoElementId, videoCanvasElementId) => {
     // load video input
     getPosesInterval = setInterval(async () => {
       let p = await detector.estimatePoses(video);
-      drawScreen();
-      poses.value = p[0];
+
+      drawScreen(p[0]);
     }, 33);
 
-    const drawScreen = () => {
+    const drawScreen = (poses) => {
+      drawKeypoints(poses);
+    };
+
+    // A function to draw ellipses over the detected keypoints
+    function drawKeypoints(currentPose) {
       var canvas = document.getElementById("videoCanvasId");
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
-      var ctx = canvas.getContext("2d");
+      ctx = canvas.getContext("2d");
       ctx.drawImage(video, 0, 0 /*, canvas.width, canvas.height */);
       ctx.beginPath();
-      ctx.arc(100, 75, 50, 0, 2 * Math.PI);
+      ctx.fillText(currentPose.score, 10, 90);
       ctx.stroke();
-    };
+      for (let i = 0; i < currentPose.keypoints.length; i++) {
+        // For each pose detected, loop through all the keypoints
+        for (let j = 0; j < currentPose.keypoints.length; j++) {
+          // A keypoint is an object describing a body part (like rightArm or leftShoulder)
+          let keypoint = currentPose.keypoints[j];
+
+          // Only draw an ellipse is the pose probability is bigger than 0.2
+          if (keypoint.score > 0.2) {
+            ctx.beginPath();
+            ctx.arc(keypoint.x, keypoint.y, 10, 0, 2 * Math.PI);
+            ctx.fillStyle = "red";
+            ctx.fill();
+            ctx.stroke();
+          }
+        }
+      }
+    }
   };
 
   const stopGetPoses = async () => {

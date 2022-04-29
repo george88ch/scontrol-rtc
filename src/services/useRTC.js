@@ -1,19 +1,22 @@
 // import firebase from "firebase/app";
 // import "firebase/firestore";
+import useFirebase from "src/boot/firebase.js";
 
-const firebaseConfig = {
-  apiKey: "AIzaSyDOYbHXcULh9lFLYvyj8_oxv84AAkJlHVw",
-  authDomain: "scontrol-quasar.firebaseapp.com",
-  projectId: "scontrol-quasar",
-  storageBucket: "scontrol-quasar.appspot.com",
-  messagingSenderId: "987144406400",
-  appId: "1:987144406400:web:784301c020c45b228d2d65",
-};
+// const firebaseConfig = {
+//   apiKey: "AIzaSyDOYbHXcULh9lFLYvyj8_oxv84AAkJlHVw",
+//   authDomain: "scontrol-quasar.firebaseapp.com",
+//   projectId: "scontrol-quasar",
+//   storageBucket: "scontrol-quasar.appspot.com",
+//   messagingSenderId: "987144406400",
+//   appId: "1:987144406400:web:784301c020c45b228d2d65",
+// };
 
-if (!firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
-}
-const firestore = firebase.firestore();
+// if (!firebase.apps.length) {
+//   firebase.initializeApp(firebaseConfig);
+// }
+// const firestore = firebase.firestore();
+
+const { firestore } = useFirebase();
 
 const useRtc = () => {
   // snapshot handlers (used to unsubscribe on hang up)

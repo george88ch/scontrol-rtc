@@ -1,19 +1,25 @@
-import firebase from "firebase/app";
-import "firebase/firestore";
+// import firebase from "firebase/app";
+// import "firebase/firestore";
 
-const firebaseConfig = {
-  apiKey: "AIzaSyDOYbHXcULh9lFLYvyj8_oxv84AAkJlHVw",
-  authDomain: "scontrol-quasar.firebaseapp.com",
-  projectId: "scontrol-quasar",
-  storageBucket: "scontrol-quasar.appspot.com",
-  messagingSenderId: "987144406400",
-  appId: "1:987144406400:web:784301c020c45b228d2d65",
+const useFirebase = () => {
+  const firebaseConfig = {
+    apiKey: "AIzaSyDOYbHXcULh9lFLYvyj8_oxv84AAkJlHVw",
+    authDomain: "scontrol-quasar.firebaseapp.com",
+    projectId: "scontrol-quasar",
+    storageBucket: "scontrol-quasar.appspot.com",
+    messagingSenderId: "987144406400",
+    appId: "1:987144406400:web:784301c020c45b228d2d65",
+  };
+
+  if (!firebase.apps.length) {
+    firebase.initializeApp(firebaseConfig);
+  }
+  const firestore = firebase.firestore();
+
+  return { firestore };
 };
 
-if (!firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
-}
-export const firestore = firebase.firestore();
+export default useFirebase;
 
 // import { initializeApp } from "firebase/app";
 // import { getAuth } from "firebase/auth";

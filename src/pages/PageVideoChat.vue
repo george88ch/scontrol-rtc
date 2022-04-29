@@ -34,7 +34,7 @@
     <h2>3. Join a Call</h2>
     <p>Answer the call from a different browser window or device</p>
 
-    <q-input type="text" v-model="searchName" label="Session Name"></q-input>
+    <q-input type="text" v-model="callId" label="Session Name"></q-input>
     <q-btn @click="onAnswerCall">Answer</q-btn>
 
     <h2>4. Hangup</h2>
@@ -45,11 +45,10 @@
 </template>
 <script setup>
 import { ref } from "vue";
-import useRtc from "src/services/useRTC";
+import useRtc from "src/composables/useRTC";
 
-const { startWebCam, createCall, answerCall, hangUp } = useRtc();
+const { callId, startWebCam, createCall, answerCall, hangUp } = useRtc();
 
-const callId = ref("");
 const sessionName = ref("");
 const searchName = ref("");
 
@@ -58,13 +57,11 @@ const onStartWebCam = async () => {
 };
 
 const onCreateCall = async () => {
-  const call = await createCall(sessionName.value);
-  callId.value = call.id;
-  sessionName.value = call.sessionname;
+  await createCall();
 };
 
 const onAnswerCall = async () => {
-  answerCall(searchName.value);
+  answerCall(callId.value);
 };
 
 const onHangUp = () => {

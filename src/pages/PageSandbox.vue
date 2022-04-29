@@ -1,6 +1,20 @@
 <template>
   <q-page>
     <h1>Sandbox</h1>
+    <q-card>
+      <q-card-section>
+        <h2>Firestore</h2>
+      </q-card-section>
+      <q-card-actions>
+        <q-btn @click="onGetAllDocs">getAllDocs</q-btn>
+      </q-card-actions>
+      <q-card-section>
+        <h3>Results</h3>
+      </q-card-section>
+      <q-card-section>
+        <pre>{{ result }}</pre>
+      </q-card-section>
+    </q-card>
     <q-card v-show="false">
       <q-card-section>
         <h2>useMouseCoordinates</h2>
@@ -41,7 +55,7 @@
       <q-card-section>
         <h3>Poses:</h3>
         <div id="canvaswrapper"></div>
-        <pre>{{ poses.score }}</pre>
+        <pre> poses.score </pre>
       </q-card-section>
       <q-card-actions>
         <q-btn @click="onStartPoses">Start Poses</q-btn>
@@ -55,6 +69,7 @@
 import { useMouseCoordinates } from "src/composables/useMouseCoordinates";
 import { useWebcam } from "src/composables/useWebcam";
 import { usePosenet } from "src/composables/usePosenet";
+import { useFirestore } from "src/composables/useFirestore";
 
 const { x, y } = useMouseCoordinates("canvasId");
 const { takePicture } = useWebcam("videoId", "videoCanvasId");
@@ -70,6 +85,15 @@ const {
 // Webcam
 const onTakePicture = () => {
   takePicture();
+};
+
+/*
+  Firestore
+*/
+const { result, getAllDocs } = useFirestore();
+
+const onGetAllDocs = async () => {
+  await getAllDocs("calls");
 };
 
 /*

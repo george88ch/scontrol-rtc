@@ -1,25 +1,16 @@
-// import firebase from "firebase/app";
-// import "firebase/firestore";
+import { ref, onMounted, onUnmounted } from "vue";
+import useFirebase from "src/boot/firebase.js";
 
-const firebaseConfig = {
-  apiKey: "AIzaSyDOYbHXcULh9lFLYvyj8_oxv84AAkJlHVw",
-  authDomain: "scontrol-quasar.firebaseapp.com",
-  projectId: "scontrol-quasar",
-  storageBucket: "scontrol-quasar.appspot.com",
-  messagingSenderId: "987144406400",
-  appId: "1:987144406400:web:784301c020c45b228d2d65",
-};
-
-if (!firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
-}
-const firestore = firebase.firestore();
+const { firestore } = useFirebase();
 
 const useRtc = () => {
   // snapshot handlers (used to unsubscribe on hang up)
   let unsubOfferCandidates = null;
   let unsubAnswerCandidates = null;
   let unsubCallDoc = null;
+
+  const callId = ref("");
+  const sessionName = ref("");
 
   // server config
   const servers = {
@@ -56,39 +47,34 @@ const useRtc = () => {
 
     // Push tracks from local stream to peer connection
     localStream.getTracks().forEach((track) => {
-      console.log("ontrack local", track);
       pc.addTrack(track, localStream);
     });
 
     // Pull tracks from remote stream, add to video stream
     pc.ontrack = (event) => {
       event.streams[0].getTracks().forEach((track) => {
-        console.log("ontrack remote", track);
         remoteStream.addTrack(track);
       });
     };
 
     remoteVideo.srcObject = remoteStream;
     webcamVideo.srcObject = localStream;
-
-    // callButton.disabled = false;
-    // answerButton.disabled = false;
-    // webcamButton.disabled = true;
   };
 
   //
   // Create an offer
   //
-  const createCall = (sessionName) => {
+  const createCall = async () => {
     // Reference Firestore collections for signaling
-    const callDoc = firestore.collection('calls').doc();
-    const offerCandidates = callDoc.collection('offerCandidates');
-    const answerCandidates = callDoc.collection('answerCandidates');
+    const callDoc = firestore.collection("calls").doc();
+    const offerCandidates = callDoc.collection("offerCandidates");
+    const answerCandidates = callDoc.collection("answerCandidates");
 
-    callInput.value = callDoc.id;
+    // set call id
+    callId.value = callDoc.id;
 
     // Get candidates for caller, save to db
-    pc.onicecandidate = event => {
+    pc.onicecandidate = (event) => {
       event.candidate && offerCandidates.add(event.candidate.toJSON());
     };
 
@@ -104,7 +90,7 @@ const useRtc = () => {
     await callDoc.set({ offer });
 
     // Listen for remote answer
-    callDoc.onSnapshot((snapshot) => {
+    unsubCallDoc = callDoc.onSnapshot((snapshot) => {
       const data = snapshot.data();
       if (!pc.currentRemoteDescription && data?.answer) {
         const answerDescription = new RTCSessionDescription(data.answer);
@@ -113,68 +99,55 @@ const useRtc = () => {
     });
 
     // Listen for remote ICE candidates
-    answerCandidates.onSnapshot(snapshot => {
+    unsubAnswerCandidates = answerCandidates.onSnapshot((snapshot) => {
       snapshot.docChanges().forEach((change) => {
-        if (change.type === 'added') {
+        if (change.type === "added") {
           const candidate = new RTCIceCandidate(change.doc.data());
           pc.addIceCandidate(candidate);
         }
       });
     });
   };
-}
 
   //
   // answer call
   //
-  const answerCall = (sessionName) => {
-    return new Promise(async (resolve, reject) => {
-      // get call id (with session name)
-      const callId = await getCallId(sessionName);
-      if (!callId) {
-        console.log("error");
-        reject("error");
-      }
+  const answerCall = async (callId) => {
+    const callDoc = firestore.collection("calls").doc(callId);
+    const offerCandidates = callDoc.collection("offerCandidates");
+    const answerCandidates = callDoc.collection("answerCandidates");
 
-      // read offer
-      // const callDoc = await getCallData(callId);
-      // console.log("callDoc: ", callDoc);
+    pc.onicecandidate = (event) => {
+      event.candidate && answerCandidates.add(event.candidate.toJSON());
+    };
 
-      const callDoc = firestore.collection("calls").doc(callId);
-      const answerCandidates = callDoc.collection("answerCandidates");
-      const offerCandidates = callDoc.collection("offerCandidates");
+    // Fetch data, then set the offer & answer
 
-      pc.onicecandidate = (event) => {
-        event.candidate && answerCandidates.add(event.candidate.toJSON());
-      };
-      const res = await callDoc.get();
-      const callData = res.data();
-      console.log(" 1 calData: ", callData);
+    const callData = (await callDoc.get()).data();
 
-      const offerDescription = callData.offer;
-      await pc.setRemoteDescription(
-        new RTCSessionDescription(offerDescription)
-      );
+    const offerDescription = callData.offer;
+    await pc.setRemoteDescription(new RTCSessionDescription(offerDescription));
 
-      const answerDescription = await pc.createAnswer();
-      await pc.setLocalDescription(answerDescription);
+    const answerDescription = await pc.createAnswer();
+    await pc.setLocalDescription(answerDescription);
 
-      const answer = {
-        type: answerDescription.type,
-        sdp: answerDescription.sdp,
-      };
+    const answer = {
+      type: answerDescription.type,
+      sdp: answerDescription.sdp,
+    };
 
-      await callDoc.update({ answer });
+    await callDoc.update({ answer });
 
-      unsubOfferCandidates = offerCandidates.onSnapshot((snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-          if (change.type === "added") {
-            let data = change.doc.data();
-            pc.addIceCandidate(new RTCIceCandidate(data));
-          }
-        });
+    // Listen to offer candidates
+
+    offerCandidates.onSnapshot((snapshot) => {
+      snapshot.docChanges().forEach((change) => {
+        console.log(change);
+        if (change.type === "added") {
+          let data = change.doc.data();
+          pc.addIceCandidate(new RTCIceCandidate(data));
+        }
       });
-      resolve();
     });
   };
   //
@@ -194,16 +167,20 @@ const useRtc = () => {
     }
 
     // stop local stream
-    const localtracks = localStream.getTracks();
-    localtracks.forEach(function (track) {
-      track.stop();
-    });
+    if (localStream) {
+      const localtracks = localStream.getTracks();
+      localtracks.forEach(function (track) {
+        track.stop();
+      });
+    }
 
     // stop remote stream
-    const remotetracks = localStream.getTracks();
-    remotetracks.forEach(function (track) {
-      track.stop();
-    });
+    if (remoteStream) {
+      const remotetracks = localStream.getTracks();
+      remotetracks.forEach(function (track) {
+        track.stop();
+      });
+    }
 
     // reset vars
     localStream = null;
@@ -258,7 +235,7 @@ const useRtc = () => {
     });
   };
 
-  return { startWebCam, createCall, answerCall, hangUp };
+  return { callId, startWebCam, createCall, answerCall, hangUp };
 };
 
 export default useRtc;
