@@ -10,6 +10,10 @@ const routes = [
         component: () => import("pages/PageVideoChat.vue"),
       },
       {
+        path: "/datachannel",
+        component: () => import("pages/PageDataChannel.vue"),
+      },
+      {
         path: "/segmentation",
         component: () => import("pages/PageSegmentation.vue"),
       },

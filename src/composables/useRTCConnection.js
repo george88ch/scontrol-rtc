@@ -1,17 +1,16 @@
 import { ref, onMounted, onUnmounted } from "vue";
 import useFirebase from "src/boot/firebase.js";
 
-const { firestore } = useFirebase();
-
-const useRtc = () => {
+const useRtcConnection = () => {
+  const { firestore } = useFirebase();
   // snapshot handlers (used to unsubscribe on hang up)
   let unsubOfferCandidates = null;
   let unsubAnswerCandidates = null;
   let unsubCallDoc = null;
 
-  let sendChannel = null;
-
-  const callId = ref("");
+  // connection id (will be needed for joining the connection)
+  const connectionId = ref("");
+  const message = ref("");
 
   // server config
   const servers = {
@@ -23,118 +22,59 @@ const useRtc = () => {
     iceCandidatePoolSize: 10,
   };
 
-  // global states
-  const pc = new RTCPeerConnection(servers);
+  // initiate peer connection
+  const peerConnection = new RTCPeerConnection(servers);
 
+  // RTCPeerConnections
+  let localConnection = null;
+  let remoteConnection = null;
+
+  //  RTCDataChannel handlers for sender (local) and receiver (remote)
+  let sendChannel = null; // RTCDataChannel for the local (sender)
+  let receiveChannel = null; // RTCDataChannel for the remote (receiver)
+
+  // video handler
   let localStream = null;
   let remoteStream = null;
-
   let webcamVideo = null;
   let remoteVideo = null;
-  let callInput = null;
-
-  //
-  // Start data channel
-  //
-  const startDataChannel = async () => {
-    console.log("localConnection", pc);
-    sendChannel = pc.createDataChannel("sendChannel");
-    console.log("sendChannel", sendChannel);
-
-    sendChannel.onopen = handleSendChannelStatusChange;
-    sendChannel.onclose = handleSendChannelStatusChange;
-  };
-
-  const handleSendChannelStatusChange = () => {
-    if (sendChannel) {
-      console.log("ready state: ", sendChannel.readyState);
-      var state = sendChannel.readyState;
-
-      if (state === "open") {
-        messageInputBox.disabled = false;
-        messageInputBox.focus();
-        sendButton.disabled = false;
-        disconnectButton.disabled = false;
-        connectButton.disabled = true;
-      } else {
-        messageInputBox.disabled = true;
-        sendButton.disabled = true;
-        connectButton.disabled = false;
-        disconnectButton.disabled = true;
-      }
-    }
-  };
-
-  const sendMessage = async (msg) => {
-    if (!sendChannel) {
-      await startDataChannel();
-    }
-    sendChannel.send(msg);
-  };
-
-  //
-  // Media setup
-  //
-  const startWebCam = async () => {
-    webcamVideo = document.getElementById("webcamVideo");
-    remoteVideo = document.getElementById("remoteVideo");
-
-    localStream = await navigator.mediaDevices.getUserMedia({
-      video: true,
-      audio: false,
-    });
-    remoteStream = new MediaStream();
-
-    // Push tracks from local stream to peer connection
-    localStream.getTracks().forEach((track) => {
-      pc.addTrack(track, localStream);
-    });
-
-    // Pull tracks from remote stream, add to video stream
-    pc.ontrack = (event) => {
-      event.streams[0].getTracks().forEach((track) => {
-        remoteStream.addTrack(track);
-      });
-    };
-
-    remoteVideo.srcObject = remoteStream;
-    webcamVideo.srcObject = localStream;
-  };
 
   //
   // Create an offer
   //
   const createCall = async () => {
-    // Reference Firestore collections for signaling
+    // Create new call document and save its id
     const callDoc = firestore.collection("calls").doc();
+    // set call id
+    connectionId.value = callDoc.id;
+
     const offerCandidates = callDoc.collection("offerCandidates");
     const answerCandidates = callDoc.collection("answerCandidates");
 
-    // set call id
-    callId.value = callDoc.id;
-
     // Get candidates for caller, save to db
-    pc.onicecandidate = (event) => {
+    // ice candidate provides the information about the ipaddress and port from where the data is going to be exchanged.
+    peerConnection.onicecandidate = (event) => {
       event.candidate && offerCandidates.add(event.candidate.toJSON());
     };
 
     // Create offer
-    const offerDescription = await pc.createOffer();
-    await pc.setLocalDescription(offerDescription);
+    const offerDescription = await peerConnection.createOffer();
+    await peerConnection.setLocalDescription(offerDescription);
 
     const offer = {
       sdp: offerDescription.sdp,
       type: offerDescription.type,
     };
 
+    // write offer to call document (db)
     await callDoc.set({ offer });
 
     // Listen for remote answer
     unsubCallDoc = callDoc.onSnapshot((snapshot) => {
       const data = snapshot.data();
-      if (!pc.currentRemoteDescription && data?.answer) {
+      if (!peerConnection.currentRemoteDescription && data?.answer) {
         const answerDescription = new RTCSessionDescription(data.answer);
-        pc.setRemoteDescription(answerDescription);
+        peerConnection.setRemoteDescription(answerDescription);
       }
     });
 
@@ -143,7 +83,7 @@ const useRtc = () => {
       snapshot.docChanges().forEach((change) => {
         if (change.type === "added") {
           const candidate = new RTCIceCandidate(change.doc.data());
-          pc.addIceCandidate(candidate);
+          peerConnection.addIceCandidate(candidate);
         }
       });
     });
@@ -153,23 +93,26 @@ const useRtc = () => {
   // answer call
   //
   const answerCall = async (callId) => {
+    // read call doc from db
     const callDoc = firestore.collection("calls").doc(callId);
+
     const offerCandidates = callDoc.collection("offerCandidates");
     const answerCandidates = callDoc.collection("answerCandidates");
 
-    pc.onicecandidate = (event) => {
+    peerConnection.onicecandidate = (event) => {
       event.candidate && answerCandidates.add(event.candidate.toJSON());
     };
 
     // Fetch data, then set the offer & answer
-
     const callData = (await callDoc.get()).data();
 
     const offerDescription = callData.offer;
-    await pc.setRemoteDescription(new RTCSessionDescription(offerDescription));
+    await peerConnection.setRemoteDescription(
+      new RTCSessionDescription(offerDescription)
+    );
 
-    const answerDescription = await pc.createAnswer();
-    await pc.setLocalDescription(answerDescription);
+    const answerDescription = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answerDescription);
 
     const answer = {
       type: answerDescription.type,
@@ -182,7 +125,7 @@ const useRtc = () => {
 
     offerCandidates.onSnapshot((snapshot) => {
       snapshot.docChanges().forEach((change) => {
-        console.log(change);
+        console.log("offerCandidate added", change);
         if (change.type === "added") {
           let data = change.doc.data();
           pc.addIceCandidate(new RTCIceCandidate(data));
@@ -190,6 +133,20 @@ const useRtc = () => {
       });
     });
   };
+
+  //
+  // send message
+  //
+  const sendMessage = () => {
+    console.log("sending message");
+    sendChannel.send(message.value);
+
+    // @TODO Clear the input box and re-focus it, so that we're
+    // ready for the next message.
+    // messageInputBox.value = "";
+    // messageInputBox.focus();
+  };
+
   //
   // hang up
   //
@@ -222,25 +179,40 @@ const useRtc = () => {
       });
     }
 
+    // Close the connection, including data channels if they're open.
+    // Also update the UI to reflect the disconnected status.
+    // Close the RTCDataChannels if they're open.
+    sendChannel.close();
+    receiveChannel.close();
+
+    // Close the RTCPeerConnections
+
+    localConnection.close();
+    remoteConnection.close();
+
     // reset vars
+    sendChannel = null;
+    receiveChannel = null;
+    localConnection = null;
+    remoteConnection = null;
     localStream = null;
     remoteStream = null;
     webcamVideo = null;
     remoteVideo = null;
     localStream = null;
+    peerConnection = null;
 
     return true;
   };
 
   return {
-    callId,
-    startDataChannel,
-    startWebCam,
     createCall,
     answerCall,
     hangUp,
     sendMessage,
+    message,
+    connectionId,
   };
 };
 
-export default useRtc;
+export default useRtcConnection;
