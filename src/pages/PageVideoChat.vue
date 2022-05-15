@@ -1,5 +1,5 @@
 <template>
-  <q-page>
+  <q-page class="q-ma-sm">
     <h2>1. Start your Webcam</h2>
     <div class="videos">
       <span>
@@ -34,7 +34,7 @@
     <h2>3. Join a Call</h2>
     <p>Answer the call from a different browser window or device</p>
 
-    <q-input type="text" v-model="callId" label="Session Name"></q-input>
+    <q-input type="text" v-model="callId" label="Session Id"></q-input>
     <q-btn @click="onAnswerCall">Answer</q-btn>
 
     <h2>4. Hangup</h2>
@@ -75,6 +75,9 @@ const onHangUp = () => {
 // };
 </script>
 <style scoped>
+.q-card {
+  margin-bottom: 12px;
+}
 video {
   width: 40vw;
   height: 30vw;

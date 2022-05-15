@@ -1,16 +1,16 @@
 import { ref, onMounted, onUnmounted } from "vue";
+import { date } from "quasar";
 import useFirebase from "src/boot/firebase.js";
+import { useSessionStore } from "src/stores/session";
 
 const useRtcConnection = () => {
   const { firestore } = useFirebase();
-  // snapshot handlers (used to unsubscribe on hang up)
+  const store = useSessionStore();
+
+  // firestore snapshot handlers (used to unsubscribe on hang up)
   let unsubOfferCandidates = null;
   let unsubAnswerCandidates = null;
   let unsubCallDoc = null;
-
-  // connection id (will be needed for joining the connection)
-  const connectionId = ref("");
-  const message = ref("");
 
   // server config
   const servers = {
@@ -22,59 +22,99 @@ const useRtcConnection = () => {
     iceCandidatePoolSize: 10,
   };
 
-  // initiate peer connection
-  const peerConnection = new RTCPeerConnection(servers);
+  //
+  // onMounted: initiate RPC connection and webcam
+  //
+  onMounted(() => {
+    // create connection (if no connection exists yet)
+    if (!store.peerConnection) {
+      store.peerConnection = new RTCPeerConnection(servers);
+      log("RTC Connection initiated.");
+    }
 
-  // RTCPeerConnections
-  let localConnection = null;
-  let remoteConnection = null;
+    // get DOM elements (if not yet done)
+    if (!store.webcamVideo) {
+      store.webcamVideo = document.getElementById("webcamVideo");
+      store.remoteVideo = document.getElementById("remoteVideo");
+      log("local and remote video element set.");
+    }
+  });
 
-  //  RTCDataChannel handlers for sender (local) and receiver (remote)
-  let sendChannel = null; // RTCDataChannel for the local (sender)
-  let receiveChannel = null; // RTCDataChannel for the remote (receiver)
+  //
+  // Cleanup
+  //
+  onUnmounted(() => {
+    store.resetConnection();
+  });
 
-  // video handler
-  let localStream = null;
-  let remoteStream = null;
-  let webcamVideo = null;
-  let remoteVideo = null;
+  //
+  // Media (invoked by button in frontend)
+  //
+  const startWebcam = async () => {
+    // setting local stream to the video from our camera
+    store.localStream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: false,
+    });
+
+    // Pushing tracks from local stream to peerConnection
+    store.localStream.getTracks().forEach((track) => {
+      store.peerConnection.addTrack(track, store.localStream);
+    });
+
+    // prepare remote video mediastream
+    store.remoteStream = new MediaStream();
+
+    // pull tracks from remote stream, add to video stream
+    store.peerConnection.ontrack = (event) => {
+      event.streams[0].getTracks((track) => {
+        store.remoteStream.addTrack(track);
+      });
+    };
+    store.remoteVideo.srcObject = store.remoteStream;
+
+    // displaying the video data from the stream to the webpage
+    store.webcamVideo.srcObject = store.localStream;
+  };
 
   //
   // Create an offer
   //
   const createCall = async () => {
-    // Create new call document and save its id
+    // Reference Firestore collections for signaling
     const callDoc = firestore.collection("calls").doc();
-    // set call id
-    connectionId.value = callDoc.id;
-
     const offerCandidates = callDoc.collection("offerCandidates");
     const answerCandidates = callDoc.collection("answerCandidates");
 
+    // set call id
+    store.connectionId = callDoc.id;
+    log("Connection created " + store.connectionId);
+
+    // initiate data channel (will trigger signaling)
+    store.dataChannel = store.peerConnection.createDataChannel("datachannel");
+
     // Get candidates for caller, save to db
-    // ice candidate provides the information about the ipaddress and port from where the data is going to be exchanged.
-    peerConnection.onicecandidate = (event) => {
+    store.peerConnection.onicecandidate = (event) => {
       event.candidate && offerCandidates.add(event.candidate.toJSON());
     };
 
     // Create offer
-    const offerDescription = await peerConnection.createOffer();
-    await peerConnection.setLocalDescription(offerDescription);
+    const offerDescription = await store.peerConnection.createOffer();
+    await store.peerConnection.setLocalDescription(offerDescription);
 
     const offer = {
       sdp: offerDescription.sdp,
       type: offerDescription.type,
     };
 
-    // write offer to call document (db)
     await callDoc.set({ offer });
 
     // Listen for remote answer
     unsubCallDoc = callDoc.onSnapshot((snapshot) => {
       const data = snapshot.data();
-      if (!peerConnection.currentRemoteDescription && data?.answer) {
+      if (!store.peerConnection.currentRemoteDescription && data?.answer) {
         const answerDescription = new RTCSessionDescription(data.answer);
-        peerConnection.setRemoteDescription(answerDescription);
+        store.peerConnection.setRemoteDescription(answerDescription);
       }
     });
 
@@ -83,7 +123,7 @@ const useRtcConnection = () => {
       snapshot.docChanges().forEach((change) => {
         if (change.type === "added") {
           const candidate = new RTCIceCandidate(change.doc.data());
-          peerConnection.addIceCandidate(candidate);
+          store.peerConnection.addIceCandidate(candidate);
         }
       });
     });
@@ -92,14 +132,13 @@ const useRtcConnection = () => {
   //
   // answer call
   //
-  const answerCall = async (callId) => {
+  const answerCall = async () => {
     // read call doc from db
-    const callDoc = firestore.collection("calls").doc(callId);
-
+    const callDoc = firestore.collection("calls").doc(store.connectionId);
     const offerCandidates = callDoc.collection("offerCandidates");
     const answerCandidates = callDoc.collection("answerCandidates");
 
-    peerConnection.onicecandidate = (event) => {
+    store.peerConnection.onicecandidate = (event) => {
       event.candidate && answerCandidates.add(event.candidate.toJSON());
     };
 
@@ -107,12 +146,14 @@ const useRtcConnection = () => {
     const callData = (await callDoc.get()).data();
 
     const offerDescription = callData.offer;
-    await peerConnection.setRemoteDescription(
+    await store.peerConnection.setRemoteDescription(
       new RTCSessionDescription(offerDescription)
     );
 
-    const answerDescription = await peerConnection.createAnswer();
-    await peerConnection.setLocalDescription(answerDescription);
+    log("Answer created.");
+
+    const answerDescription = await store.peerConnection.createAnswer();
+    await store.peerConnection.setLocalDescription(answerDescription);
 
     const answer = {
       type: answerDescription.type,
@@ -121,14 +162,15 @@ const useRtcConnection = () => {
 
     await callDoc.update({ answer });
 
+    log("Call answered");
+
     // Listen to offer candidates
 
     offerCandidates.onSnapshot((snapshot) => {
       snapshot.docChanges().forEach((change) => {
-        console.log("offerCandidate added", change);
         if (change.type === "added") {
           let data = change.doc.data();
-          pc.addIceCandidate(new RTCIceCandidate(data));
+          store.peerConnection.addIceCandidate(new RTCIceCandidate(data));
         }
       });
     });
@@ -137,9 +179,9 @@ const useRtcConnection = () => {
   //
   // send message
   //
-  const sendMessage = () => {
-    console.log("sending message");
-    sendChannel.send(message.value);
+  const sendMessage = async (msg) => {
+    log("sending message");
+    await store.dataChannel.send(msg);
 
     // @TODO Clear the input box and re-focus it, so that we're
     // ready for the next message.
@@ -147,11 +189,31 @@ const useRtcConnection = () => {
     // messageInputBox.focus();
   };
 
+  const createDataChannel = async () => {
+    store.dataChannel = await store.peerConnection.createDataChannel(
+      "datachannel"
+    );
+    log("Datachannel created.");
+
+    store.dataChannel.onmessage = function (event) {
+      log("received: " + event.data);
+      store.messageList.push(event.data);
+    };
+
+    store.dataChannel.onopen = function () {
+      log("datachannel open");
+    };
+
+    store.dataChannel.onclose = function () {
+      log("datachannel close");
+    };
+  };
+
   //
   // hang up
   //
   const hangUp = async () => {
-    console.log("hangup");
+    log("hangup");
     // unsub
     if (unsubOfferCandidates) {
       unsubOfferCandidates();
@@ -164,16 +226,16 @@ const useRtcConnection = () => {
     }
 
     // stop local stream
-    if (localStream) {
-      const localtracks = localStream.getTracks();
+    if (store.localStream) {
+      const localtracks = store.localStream.getTracks();
       localtracks.forEach(function (track) {
         track.stop();
       });
     }
 
     // stop remote stream
-    if (remoteStream) {
-      const remotetracks = localStream.getTracks();
+    if (store.remoteStream) {
+      const remotetracks = store.remoteStream.getTracks();
       remotetracks.forEach(function (track) {
         track.stop();
       });
@@ -182,19 +244,11 @@ const useRtcConnection = () => {
     // Close the connection, including data channels if they're open.
     // Also update the UI to reflect the disconnected status.
     // Close the RTCDataChannels if they're open.
-    sendChannel.close();
-    receiveChannel.close();
-
-    // Close the RTCPeerConnections
-
-    localConnection.close();
-    remoteConnection.close();
+    store.dataChannel.close();
 
     // reset vars
-    sendChannel = null;
+    dataChannel = null;
     receiveChannel = null;
-    localConnection = null;
-    remoteConnection = null;
     localStream = null;
     remoteStream = null;
     webcamVideo = null;
@@ -205,13 +259,25 @@ const useRtcConnection = () => {
     return true;
   };
 
+  //
+  // Montior entries for debugging and logging
+  //
+  const log = (msg) => {
+    console.log("log: ", msg);
+    const formattedString = date.formatDate(Date.now(), "DD.MM.YYYY HH:mm:ss");
+    const logentry = {
+      timestamp: formattedString,
+      content: msg,
+    };
+    store.monitor.push(logentry);
+  };
+
   return {
+    startWebcam,
     createCall,
     answerCall,
     hangUp,
     sendMessage,
-    message,
-    connectionId,
   };
 };
 

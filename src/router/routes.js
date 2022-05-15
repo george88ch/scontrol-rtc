@@ -4,6 +4,10 @@ const routes = [
     component: () => import("layouts/MainLayout.vue"),
     children: [
       { path: "", component: () => import("pages/IndexPage.vue") },
+      {
+        path: "/connection",
+        component: () => import("pages/PageConnection.vue"),
+      },
 
       {
         path: "/videochat",

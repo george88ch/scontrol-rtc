@@ -12,6 +12,7 @@ const useRTCDataChannel = () => {
   //
   const message = ref("");
   const callId = ref("");
+  const logList = ref([]);
 
   //
   // init RTCPeerConnections
@@ -219,6 +220,7 @@ const useRTCDataChannel = () => {
     // refs
     message,
     callId,
+    logList,
   };
 };
 
