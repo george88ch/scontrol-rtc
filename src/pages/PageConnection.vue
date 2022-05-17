@@ -23,39 +23,32 @@
         <q-btn @click="onSendMessage">Send</q-btn>
       </q-card-actions>
     </q-card>
+    <CompVideo />
   </q-page>
 </template>
 <script setup>
 import { ref, onMounted, onUnmounted } from "vue";
 import { useSessionStore } from "src/stores/session";
-import useConnection from "src/composables/useConnection";
+import CompVideo from "src/components/CompVideo.vue";
 
-const {
-  createPeerConnection,
-  createCall,
-  resetConnection,
-  answerCall,
-  // handleDataChannel,
-  sendMessage,
-} = useConnection();
 const store = useSessionStore();
 
 const message = ref("");
 
 const onCreateCall = async () => {
-  await createCall();
+  await store.createCall();
 };
 
 const onAnswerCall = async () => {
-  await answerCall();
+  await store.answerCall();
 };
 const onHangup = async () => {
-  await resetConnection();
+  await store.cleanUp();
 };
 // const onOpenDataChannel = async () => {
 //   await handleDataChannel();
 // };
 const onSendMessage = async () => {
-  sendMessage(message.value);
+  store.sendMessage(message.value);
 };
 </script>
